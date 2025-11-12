@@ -509,7 +509,7 @@
                     </div>
                     <div class="form-group">
                         <label>User Type</label>
-                        <select name="user_type" required>
+                        <select name="user_type" id="user-type-select" required>
                             <option value="student">Student</option>
                             <option value="faculty">Faculty</option>
                             <option value="organizer">Organizer</option>
@@ -816,8 +816,8 @@
 
     <script>
         // Supabase Configuration - REPLACE THESE WITH YOUR ACTUAL VALUES
-        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+        const SUPABASE_URL = 'https://ernqusmwpwsmgroazjkp.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVybnF1c213cHdzbWdyb2F6amtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI3NTUxMDMsImV4cCI6MjA3ODMzMTEwM30.EezH1XPdQhwNRmjqP3CVHRtGmgc3YjPvQG7exrMNMiM';
         
         // Initialize Supabase client immediately
         const { createClient } = window.supabase;
@@ -827,6 +827,7 @@
         let currentUser = null;
         let currentUserProfile = null;
         let currentProjectId = null;
+        let availableSkills = [];
 
         // Initialize app
         async function init() {
@@ -1096,7 +1097,7 @@
             const projectsList = document.getElementById('projects-list');
             if (projects && projects.length > 0) {
                 projectsList.innerHTML = projects.map(project => `
-                    <div class="card" onclick="showProjectDetails(${project.id})">
+                    <div class="card" onclick="showProjectDetails(${project.id})" style="cursor: pointer;">
                         <h3>${project.title}</h3>
                         <p>${project.short_description || project.description?.substring(0, 100) + '...' || 'No description'}</p>
                         <div style="margin: 0.5rem 0;">
@@ -1154,7 +1155,7 @@
                         <p>${team.description || 'No description'}</p>
                         <div class="card-footer">
                             <span>${team.current_members || 0}/${team.max_members || 5} members</span>
-                            ${currentUserProfile?.user_type === 'student' ? `<button class="btn btn-primary" onclick="applyToTeam(${team.id})">Apply</button>` : ''}
+                            ${currentUserProfile?.user_type === 'student' ? `<button class="btn btn-primary" onclick="event.stopPropagation(); applyToTeam(${team.id})">Apply</button>` : ''}
                         </div>
                     </div>
                 `).join('');
@@ -1218,9 +1219,12 @@
                 closeModal('create-project-modal');
                 form.reset();
                 loadProjects();
-                loadDashboard();
+                if (currentUserProfile?.user_type === 'organizer') {
+                    loadDashboard();
+                }
             } catch (error) {
-                alert('Error: ' + error.message);
+                console.error('Create project error:', error);
+                alert('Error creating project: ' + error.message);
             }
         }
 
@@ -1270,9 +1274,12 @@
                 closeModal('create-team-modal');
                 form.reset();
                 loadTeams();
-                loadDashboard();
+                if (currentUserProfile?.user_type === 'student') {
+                    loadDashboard();
+                }
             } catch (error) {
-                alert('Error: ' + error.message);
+                console.error('Create team error:', error);
+                alert('Error creating team: ' + error.message);
             }
         }
 
@@ -1301,33 +1308,55 @@
                 
                 alert('Application submitted successfully!');
             } catch (error) {
+                console.error('Apply to team error:', error);
                 alert('Error: ' + error.message);
             }
         }
 
         // Load Skills
-        let availableSkills = [];
         async function loadSkills() {
-            const { data: skills } = await supabase
-                .from('skills')
-                .select('*')
-                .order('skill_name');
-            
-            if (skills) {
-                availableSkills = skills;
-                const skillSelect = document.getElementById('skill-select');
-                skillSelect.innerHTML = '<option value="">Choose a skill...</option>' +
-                    skills.map(skill => `<option value="${skill.id}">${skill.skill_name}</option>`).join('');
+            try {
+                const { data: skills, error } = await supabase
+                    .from('skills')
+                    .select('*')
+                    .order('skill_name');
+                
+                if (error) throw error;
+                
+                if (skills) {
+                    availableSkills = skills;
+                    const skillSelect = document.getElementById('skill-select');
+                    if (skillSelect) {
+                        skillSelect.innerHTML = '<option value="">Choose a skill...</option>' +
+                            skills.map(skill => `<option value="${skill.id}">${skill.skill_name}</option>`).join('');
+                    }
+                }
+            } catch (error) {
+                console.error('Load skills error:', error);
             }
         }
 
         // Add Skill to User
         async function addSkillToUser() {
+            if (!currentUser) {
+                alert('Please login first');
+                return;
+            }
+            
             const skillId = document.getElementById('skill-select').value;
-            if (!skillId) return;
+            if (!skillId) {
+                return;
+            }
             
             const proficiency = prompt('Proficiency level (beginner/intermediate/advanced/expert):', 'intermediate');
             if (!proficiency) return;
+            
+            // Validate proficiency
+            const validLevels = ['beginner', 'intermediate', 'advanced', 'expert'];
+            if (!validLevels.includes(proficiency.toLowerCase())) {
+                alert('Please enter a valid proficiency level: beginner, intermediate, advanced, or expert');
+                return;
+            }
             
             try {
                 const { error } = await supabase
@@ -1335,35 +1364,55 @@
                     .insert([{
                         user_id: currentUser.id,
                         skill_id: parseInt(skillId),
-                        proficiency: proficiency
+                        proficiency: proficiency.toLowerCase()
                     }]);
                 
                 if (error) throw error;
                 
                 await loadUserSkills();
                 document.getElementById('skill-select').value = '';
+                alert('Skill added successfully!');
             } catch (error) {
-                alert('Error: ' + error.message);
+                console.error('Add skill error:', error);
+                alert('Error adding skill: ' + error.message);
             }
         }
 
         // Load User Skills
         async function loadUserSkills() {
-            const { data: userSkills } = await supabase
-                .from('user_skills')
-                .select('*, skills(*)')
-                .eq('user_id', currentUser.id);
+            if (!currentUser) return;
             
-            const container = document.getElementById('user-skills-list');
-            if (userSkills && userSkills.length > 0) {
-                container.innerHTML = userSkills.map(us => `
-                    <div class="skill-tag">
-                        ${us.skills.skill_name} (${us.proficiency})
-                        <span class="remove" onclick="removeSkill(${us.id})">&times;</span>
-                    </div>
-                `).join('');
-            } else {
-                container.innerHTML = '<p style="color: var(--text-light);">No skills added yet</p>';
+            try {
+                const { data: userSkills, error } = await supabase
+                    .from('user_skills')
+                    .select('*, skills(*)')
+                    .eq('user_id', currentUser.id);
+                
+                if (error) throw error;
+                
+                const container = document.getElementById('user-skills-list');
+                if (container) {
+                    if (userSkills && userSkills.length > 0) {
+                        container.innerHTML = userSkills.map(us => `
+                            <div class="skill-tag">
+                                ${us.skills.skill_name} (${us.proficiency})
+                                <span class="remove" onclick="removeSkill(${us.id})">&times;</span>
+                            </div>
+                        `).join('');
+                    } else {
+                        container.innerHTML = '<p style="color: var(--text-light);">No skills added yet</p>';
+                    }
+                }
+                
+                // Update dashboard count if on student dashboard
+                if (currentUserProfile?.user_type === 'student') {
+                    const countElement = document.getElementById('my-skills-count');
+                    if (countElement) {
+                        countElement.textContent = userSkills?.length || 0;
+                    }
+                }
+            } catch (error) {
+                console.error('Load user skills error:', error);
             }
         }
 
@@ -1380,8 +1429,10 @@
                 if (error) throw error;
                 
                 await loadUserSkills();
+                alert('Skill removed successfully!');
             } catch (error) {
-                alert('Error: ' + error.message);
+                console.error('Remove skill error:', error);
+                alert('Error removing skill: ' + error.message);
             }
         }
 
@@ -1397,7 +1448,10 @@
             
             await loadUserSkills();
             const profileSkillsList = document.getElementById('profile-skills-list');
-            profileSkillsList.innerHTML = document.getElementById('user-skills-list').innerHTML;
+            const userSkillsList = document.getElementById('user-skills-list');
+            if (profileSkillsList && userSkillsList) {
+                profileSkillsList.innerHTML = userSkillsList.innerHTML;
+            }
         }
 
         // Update Profile
@@ -1426,20 +1480,33 @@
                 await loadUserProfile();
                 alert('Profile updated successfully!');
             } catch (error) {
-                alert('Error: ' + error.message);
+                console.error('Update profile error:', error);
+                alert('Error updating profile: ' + error.message);
             }
         }
 
         // Modal Functions
         function showModal(modalId) {
-            document.getElementById(modalId).classList.add('active');
+            const modal = document.getElementById(modalId);
+            if (!modal) return;
+            
+            modal.classList.add('active');
+            
+            // Load data for specific modals
             if (modalId === 'manage-skills-modal') {
                 loadUserSkills();
+                // Ensure skills dropdown is populated
+                if (availableSkills.length === 0) {
+                    loadSkills();
+                }
             }
         }
 
         function closeModal(modalId) {
-            document.getElementById(modalId).classList.remove('active');
+            const modal = document.getElementById(modalId);
+            if (modal) {
+                modal.classList.remove('active');
+            }
         }
 
         // Tab Switching
@@ -1455,28 +1522,34 @@
             document.getElementById(tabId).classList.remove('hidden');
             
             if (tabId === 'profile-skills') {
-                const profileSkillsList = document.getElementById('profile-skills-list');
                 loadUserSkills();
                 setTimeout(() => {
-                    profileSkillsList.innerHTML = document.getElementById('user-skills-list').innerHTML;
+                    const profileSkillsList = document.getElementById('profile-skills-list');
+                    const userSkillsList = document.getElementById('user-skills-list');
+                    if (profileSkillsList && userSkillsList) {
+                        profileSkillsList.innerHTML = userSkillsList.innerHTML;
+                    }
                 }, 100);
             }
         }
 
         // Dynamic form fields based on user type
-        document.querySelector('select[name="user_type"]')?.addEventListener('change', function(e) {
-            const studentFields = document.getElementById('student-fields');
-            const facultyFields = document.getElementById('faculty-fields');
-            
-            studentFields.classList.add('hidden');
-            facultyFields.classList.add('hidden');
-            
-            if (e.target.value === 'student') {
-                studentFields.classList.remove('hidden');
-            } else if (e.target.value === 'faculty') {
-                facultyFields.classList.remove('hidden');
-            }
-        });
+        const userTypeSelect = document.getElementById('user-type-select');
+        if (userTypeSelect) {
+            userTypeSelect.addEventListener('change', function(e) {
+                const studentFields = document.getElementById('student-fields');
+                const facultyFields = document.getElementById('faculty-fields');
+                
+                studentFields.classList.add('hidden');
+                facultyFields.classList.add('hidden');
+                
+                if (e.target.value === 'student') {
+                    studentFields.classList.remove('hidden');
+                } else if (e.target.value === 'faculty') {
+                    facultyFields.classList.remove('hidden');
+                }
+            });
+        }
 
         // Initialize on page load
         if (document.readyState === 'loading') {
